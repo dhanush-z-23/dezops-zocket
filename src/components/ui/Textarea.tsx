@@ -3,33 +3,34 @@
 import { cn } from '@/lib/utils';
 import { forwardRef } from 'react';
 
-interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   label?: string;
   error?: string;
 }
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ label, error, className, id, ...props }, ref) => {
-    const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
+    const textareaId = id || label?.toLowerCase().replace(/\s+/g, '-');
 
     return (
       <div className="flex flex-col gap-1.5">
         {label && (
           <label
-            htmlFor={inputId}
+            htmlFor={textareaId}
             className="text-sm font-medium text-text-primary"
           >
             {label}
           </label>
         )}
-        <input
+        <textarea
           ref={ref}
-          id={inputId}
+          id={textareaId}
           className={cn(
-            'h-9 w-full rounded-lg border border-border bg-white px-3 text-sm text-text-primary',
+            'w-full rounded-lg border border-border bg-white px-3 py-2 text-sm text-text-primary',
             'placeholder:text-text-tertiary',
             'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
             'disabled:cursor-not-allowed disabled:opacity-50',
+            'min-h-[80px] resize-y',
             error && 'border-error focus:border-error focus:ring-error/20',
             className
           )}
@@ -43,4 +44,4 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
   }
 );
 
-Input.displayName = 'Input';
+Textarea.displayName = 'Textarea';
