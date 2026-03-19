@@ -151,6 +151,7 @@ interface AuthState {
   getUserById: (userId: string) => User | undefined;
   updateCompany: (partial: Partial<Company>) => void;
   updateCurrentUser: (partial: Partial<User>) => void;
+  updateUser: (userId: string, partial: Partial<User>) => void;
   removeUser: (userId: string) => void;
 }
 
@@ -344,6 +345,18 @@ export const useAuthStore = create<AuthState>()(
             ),
           };
         });
+      },
+
+      updateUser: (userId: string, partial: Partial<User>) => {
+        set((state) => ({
+          allUsers: state.allUsers.map((u) =>
+            u.id === userId ? { ...u, ...partial } : u,
+          ),
+          currentUser:
+            state.currentUser?.id === userId
+              ? { ...state.currentUser, ...partial }
+              : state.currentUser,
+        }));
       },
 
       removeUser: (userId: string) => {

@@ -20,6 +20,11 @@ import {
   Send,
   Layers,
   ChevronRight,
+  Circle,
+  UserPlus,
+  Zap,
+  Paperclip,
+  X,
 } from 'lucide-react';
 import {
   BarChart,
@@ -40,8 +45,11 @@ import { useReportStore } from '@/stores/useReportStore';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
+import { Select } from '@/components/ui/Select';
+import { Textarea } from '@/components/ui/Textarea';
 import { cn, formatTime, formatDate } from '@/lib/utils';
-import type { Task, TaskStatus, User } from '@/types';
+import type { Task, TaskStatus, TaskPriority, User } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Shared helpers & animation variants
@@ -248,15 +256,189 @@ function TaskRow({ task, showAssignee = false, onClick }: { task: Task; showAssi
 }
 
 // ---------------------------------------------------------------------------
+// Designer Status Helpers
+// ---------------------------------------------------------------------------
+
+const designerStatusConfig: Record<string, { label: string; color: string; bg: string; dot: string }> = {
+  available: { label: 'Available', color: 'text-success', bg: 'bg-success/10 border-success/20', dot: 'bg-success' },
+  busy: { label: 'Busy', color: 'text-warning', bg: 'bg-warning/10 border-warning/20', dot: 'bg-warning' },
+  'on-leave': { label: 'On Leave', color: 'text-text-tertiary', bg: 'bg-surface-tertiary border-border', dot: 'bg-gray-400' },
+  blocked: { label: 'Blocked', color: 'text-error', bg: 'bg-error/10 border-error/20', dot: 'bg-error' },
+};
+
+// ---------------------------------------------------------------------------
+// Create Request Form (shared by Admin + Requester)
+// ---------------------------------------------------------------------------
+
+function CreateRequestForm({
+  isOpen,
+  onClose,
+  currentUserId,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  currentUserId: string;
+}) {
+  const createTask = useTaskStore((s) => s.createTask);
+  const spaces = useSpaceStore((s) => s.spaces);
+
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [priority, setPriority] = useState<TaskPriority>('medium');
+  const [spaceId, setSpaceId] = useState('');
+  const [files, setFiles] = useState<string[]>([]);
+  const [fileName, setFileName] = useState('');
+
+  const resetForm = useCallback(() => {
+    setTitle('');
+    setDescription('');
+    setPriority('medium');
+    setSpaceId('');
+    setFiles([]);
+    setFileName('');
+  }, []);
+
+  const handleSubmit = useCallback(() => {
+    if (!title.trim() || !spaceId) return;
+    createTask({
+      title: title.trim(),
+      description: description.trim(),
+      spaceId,
+      parentTaskId: null,
+      assigneeId: null,
+      requesterId: currentUserId,
+      priority,
+      status: 'backlog',
+      attachments: files.map((name, i) => ({
+        id: `new-att-${i}`,
+        type: 'file' as const,
+        url: `/uploads/${name}`,
+        name,
+        uploadedAt: new Date().toISOString(),
+      })),
+      expectedTimeline: { startDate: null, endDate: null },
+      designTimeline: { startDate: null, endDate: null },
+      tags: [],
+      brandId: null,
+    });
+    resetForm();
+    onClose();
+  }, [title, description, spaceId, priority, files, currentUserId, createTask, resetForm, onClose]);
+
+  const addFile = useCallback(() => {
+    if (fileName.trim()) {
+      setFiles((prev) => [...prev, fileName.trim()]);
+      setFileName('');
+    }
+  }, [fileName]);
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Create Design Request" size="lg">
+      <div className="space-y-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-text-primary">Title</label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Q3 Campaign Hero Banner"
+            className="h-9 w-full rounded-lg border border-border bg-white px-3 text-sm text-text-primary placeholder:text-text-tertiary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
+
+        <Textarea
+          label="Description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Describe what you need designed..."
+        />
+
+        <div className="grid grid-cols-2 gap-4">
+          <Select
+            label="Priority"
+            value={priority}
+            onChange={(e) => setPriority(e.target.value as TaskPriority)}
+            options={[
+              { value: 'urgent', label: 'Urgent' },
+              { value: 'high', label: 'High' },
+              { value: 'medium', label: 'Medium' },
+              { value: 'low', label: 'Low' },
+            ]}
+          />
+          <Select
+            label="Target Space"
+            value={spaceId}
+            onChange={(e) => setSpaceId(e.target.value)}
+            placeholder="Select a space"
+            options={spaces.map((s) => ({ value: s.id, label: s.name }))}
+          />
+        </div>
+
+        {/* File attachments */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-text-primary">Attachments</label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={fileName}
+              onChange={(e) => setFileName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addFile()}
+              placeholder="File name (e.g. brief.pdf)"
+              className="h-9 flex-1 rounded-lg border border-border bg-white px-3 text-sm text-text-primary placeholder:text-text-tertiary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+            <Button variant="outline" size="sm" onClick={addFile}>
+              <Paperclip className="h-3.5 w-3.5" />
+              Add
+            </Button>
+          </div>
+          {files.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {files.map((f, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 rounded-md bg-surface-tertiary px-2 py-1 text-xs text-text-secondary"
+                >
+                  <Paperclip className="h-3 w-3" />
+                  {f}
+                  <button onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}>
+                    <X className="h-3 w-3 text-text-tertiary hover:text-error" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" size="sm" onClick={() => { resetForm(); onClose(); }}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="sm" onClick={handleSubmit} disabled={!title.trim() || !spaceId}>
+            <Send className="h-3.5 w-3.5" />
+            Submit Request
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Admin / Design-Lead Dashboard
 // ---------------------------------------------------------------------------
 
 function AdminDashboard({ user, onOpenTask, onNavigate }: { user: User; onOpenTask?: (taskId: string) => void; onNavigate?: (page: string) => void }) {
   const tasks = useTaskStore((s) => s.tasks);
+  const updateTask = useTaskStore((s) => s.updateTask);
   const allUsers = useAuthStore((s) => s.allUsers);
   const getUserById = useAuthStore((s) => s.getUserById);
+  const updateUserStatus = useAuthStore((s) => s.updateUserStatus);
   const getSpaceById = useSpaceStore((s) => s.getSpaceById);
   const getDesignerWorkload = useTaskStore((s) => s.getDesignerWorkload);
+
+  const [showRequestForm, setShowRequestForm] = useState(false);
+  const [assignModalDesignerId, setAssignModalDesignerId] = useState<string | null>(null);
+  const [statusMenuDesignerId, setStatusMenuDesignerId] = useState<string | null>(null);
 
   const now = new Date();
   const weekAgo = subDays(now, 7);
@@ -356,63 +538,118 @@ function AdminDashboard({ user, onOpenTask, onNavigate }: { user: User; onOpenTa
           </div>
         </Section>
 
-        {/* Live Design Team Overview */}
+        {/* Live Design Team Overview — Enhanced */}
         <Section title="Design Team Overview" className="lg:col-span-3">
-          <div className="space-y-3">
+          <div className="space-y-4">
             {designers.map((designer) => {
               const workload = getDesignerWorkload(designer.id);
               const designerTasks = tasks.filter((t) => t.assigneeId === designer.id && !['completed', 'approved'].includes(t.status));
               const runningTask = designerTasks.find((t) => t.timerRunning);
+              const currentTask = designerTasks.find((t) => t.status === 'in-progress');
+              const todoCount = designerTasks.filter((t) => t.status === 'todo').length;
+              const inProgressCount = designerTasks.filter((t) => t.status === 'in-progress').length;
+              const inReviewCount = designerTasks.filter((t) => t.status === 'in-review').length;
               const hoursThisWeek = tasks
                 .filter((t) => t.assigneeId === designer.id && t.completedAt && isAfter(new Date(t.completedAt), weekAgo))
                 .reduce((acc, t) => acc + t.totalTimeSpent, 0);
-              const capacityPct = Math.min((hoursThisWeek / (designer.weeklyCapacityHours * 3600)) * 100, 100);
+              const activeTimeThisWeek = designerTasks.reduce((acc, t) => acc + t.totalTimeSpent, 0) + hoursThisWeek;
+              const capacityPct = Math.min((activeTimeThisWeek / (designer.weeklyCapacityHours * 3600)) * 100, 100);
+              const capacityHoursUsed = Math.round(activeTimeThisWeek / 3600 * 10) / 10;
+              const statusConf = designerStatusConfig[designer.status] ?? designerStatusConfig['available'];
+              const unassignedTasks = tasks.filter(
+                (t) => !t.assigneeId && !['completed', 'approved'].includes(t.status) && !t.parentTaskId,
+              );
 
               return (
                 <motion.div
                   key={designer.id}
                   {...fadeUp}
                   className={cn(
-                    'rounded-xl border bg-white p-4 shadow-sm transition-colors',
-                    designer.status === 'blocked' ? 'border-error/30 bg-error/5' : 'border-border',
+                    'rounded-xl border bg-white shadow-sm transition-colors overflow-hidden',
+                    designer.status === 'blocked' ? 'border-error/30' : 'border-border',
                   )}
                 >
-                  <div className="flex items-start gap-3">
+                  {/* Header row with large status */}
+                  <div className="flex items-center gap-4 p-4 pb-3">
                     <Avatar name={designer.name} size="md" status={designer.status} />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-text-primary">{designer.name}</p>
-                        <Badge variant={
-                          designer.status === 'available' ? 'success'
-                            : designer.status === 'busy' ? 'warning'
-                            : designer.status === 'blocked' ? 'error' : 'default'
-                        }>
-                          {designer.status}
-                        </Badge>
-                      </div>
+                      <p className="text-sm font-semibold text-text-primary">{designer.name}</p>
+                      {/* Skills tags */}
                       <div className="flex flex-wrap gap-1 mt-1">
-                        {designer.skills.slice(0, 3).map((s) => (
-                          <span key={s} className="rounded bg-surface-tertiary px-1.5 py-0.5 text-[10px] text-text-tertiary">{s}</span>
+                        {designer.skills.map((s) => (
+                          <span key={s} className="rounded-full bg-primary/5 border border-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary/70">{s}</span>
                         ))}
                       </div>
-                      {runningTask && (
-                        <div className="mt-2 flex items-center gap-2 rounded-lg bg-primary-light px-2.5 py-1.5">
-                          <Play className="h-3 w-3 fill-primary text-primary" />
-                          <span className="truncate text-xs font-medium text-primary">{runningTask.title}</span>
-                          <Timer className="h-3 w-3 text-primary ml-auto shrink-0" />
-                        </div>
-                      )}
-                      <div className="mt-2 flex items-center gap-3 text-xs text-text-tertiary">
-                        <span>{workload} active task{workload !== 1 ? 's' : ''}</span>
-                        <span>{designerTasks.filter((t) => t.status === 'in-review').length} in review</span>
+                    </div>
+                    {/* Large status badge */}
+                    <div className={cn('flex items-center gap-2 rounded-lg border px-3 py-1.5 relative', statusConf.bg)}>
+                      <div className={cn('h-2.5 w-2.5 rounded-full', statusConf.dot, designer.status === 'busy' && 'animate-pulse')} />
+                      <span className={cn('text-xs font-semibold capitalize', statusConf.color)}>{statusConf.label}</span>
+                    </div>
+                  </div>
+
+                  {/* Current task (if busy) with clickable link */}
+                  {currentTask && (
+                    <div
+                      onClick={() => onOpenTask?.(currentTask.id)}
+                      className="mx-4 mb-3 flex items-center gap-2.5 rounded-lg bg-primary-light border border-primary/10 px-3 py-2 cursor-pointer hover:border-primary/30 transition-colors"
+                    >
+                      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10">
+                        {runningTask?.id === currentTask.id ? (
+                          <Timer className="h-3.5 w-3.5 text-primary animate-pulse" />
+                        ) : (
+                          <Play className="h-3.5 w-3.5 text-primary" />
+                        )}
                       </div>
-                      {/* Capacity bar */}
-                      <div className="mt-2">
-                        <div className="flex justify-between text-[10px] text-text-tertiary mb-0.5">
-                          <span>Capacity</span>
-                          <span>{Math.round(capacityPct)}%</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-text-tertiary">Current task</p>
+                        <p className="truncate text-sm font-medium text-primary">{currentTask.title}</p>
+                      </div>
+                      {runningTask?.id === currentTask.id && (
+                        <span className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                          Timer running
+                        </span>
+                      )}
+                      <ChevronRight className="h-4 w-4 text-primary/50 shrink-0" />
+                    </div>
+                  )}
+                  {!currentTask && designer.status === 'available' && (
+                    <div className="mx-4 mb-3 flex items-center gap-2 rounded-lg border border-dashed border-success/30 bg-success/5 px-3 py-2">
+                      <Circle className="h-3.5 w-3.5 text-success" />
+                      <span className="text-xs text-success font-medium">Ready for new assignments</span>
+                    </div>
+                  )}
+
+                  {/* Task queue breakdown + capacity bar */}
+                  <div className="border-t border-border-light px-4 py-3">
+                    <div className="flex items-center gap-4">
+                      {/* Task queue counts */}
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="flex h-5 w-5 items-center justify-center rounded bg-info/10 text-[10px] font-bold text-info">{todoCount}</span>
+                          <span className="text-[10px] text-text-tertiary">Todo</span>
                         </div>
-                        <div className="h-1.5 rounded-full bg-surface-tertiary overflow-hidden">
+                        <div className="flex items-center gap-1.5">
+                          <span className="flex h-5 w-5 items-center justify-center rounded bg-warning/10 text-[10px] font-bold text-warning">{inProgressCount}</span>
+                          <span className="text-[10px] text-text-tertiary">In Progress</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="flex h-5 w-5 items-center justify-center rounded bg-purple-100 text-[10px] font-bold text-purple-600">{inReviewCount}</span>
+                          <span className="text-[10px] text-text-tertiary">In Review</span>
+                        </div>
+                      </div>
+
+                      {/* Capacity utilization */}
+                      <div className="w-36">
+                        <div className="flex justify-between text-[10px] text-text-tertiary mb-0.5">
+                          <span>{capacityHoursUsed}h / {designer.weeklyCapacityHours}h</span>
+                          <span className={cn(
+                            'font-semibold',
+                            capacityPct > 80 ? 'text-error' : capacityPct > 50 ? 'text-warning' : 'text-success',
+                          )}>{Math.round(capacityPct)}%</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-surface-tertiary overflow-hidden">
                           <div
                             className={cn(
                               'h-full rounded-full transition-all',
@@ -423,9 +660,79 @@ function AdminDashboard({ user, onOpenTask, onNavigate }: { user: User; onOpenTa
                         </div>
                       </div>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => onNavigate?.('reports')}>
-                      View
-                    </Button>
+                  </div>
+
+                  {/* Quick actions */}
+                  <div className="border-t border-border-light px-4 py-2.5 flex items-center gap-2">
+                    <div className="relative">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setAssignModalDesignerId(assignModalDesignerId === designer.id ? null : designer.id)}
+                      >
+                        <UserPlus className="h-3.5 w-3.5" />
+                        Assign Task
+                      </Button>
+                      {assignModalDesignerId === designer.id && unassignedTasks.length > 0 && (
+                        <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-lg border border-border bg-white shadow-lg max-h-48 overflow-y-auto">
+                          {unassignedTasks.slice(0, 8).map((t) => (
+                            <button
+                              key={t.id}
+                              onClick={() => {
+                                updateTask(t.id, { assigneeId: designer.id });
+                                setAssignModalDesignerId(null);
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-surface-secondary transition-colors border-b border-border-light last:border-0"
+                            >
+                              <Badge variant={priorityBadgeVariant(t.priority)}>{t.priority}</Badge>
+                              <span className="truncate flex-1 text-text-primary">{t.title}</span>
+                            </button>
+                          ))}
+                          {unassignedTasks.length === 0 && (
+                            <p className="px-3 py-2 text-xs text-text-tertiary">No unassigned tasks</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setStatusMenuDesignerId(statusMenuDesignerId === designer.id ? null : designer.id)}
+                      >
+                        <Zap className="h-3.5 w-3.5" />
+                        Status
+                      </Button>
+                      {statusMenuDesignerId === designer.id && (
+                        <div className="absolute left-0 top-full z-20 mt-1 w-40 rounded-lg border border-border bg-white shadow-lg">
+                          {(['available', 'busy', 'on-leave', 'blocked'] as const).map((st) => {
+                            const conf = designerStatusConfig[st];
+                            return (
+                              <button
+                                key={st}
+                                onClick={() => {
+                                  updateUserStatus(designer.id, st);
+                                  setStatusMenuDesignerId(null);
+                                }}
+                                className={cn(
+                                  'flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-surface-secondary transition-colors',
+                                  designer.status === st && 'bg-surface-secondary font-medium',
+                                )}
+                              >
+                                <div className={cn('h-2 w-2 rounded-full', conf.dot)} />
+                                <span className="text-text-primary">{conf.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    <div className="ml-auto">
+                      <Button variant="ghost" size="sm" onClick={() => onNavigate?.('reports')}>
+                        View Report
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 </motion.div>
               );
@@ -584,6 +891,26 @@ function AdminDashboard({ user, onOpenTask, onNavigate }: { user: User; onOpenTa
         </div>
       </Section>
 
+      {/* Create Request CTA for cross-team requests */}
+      <Section title="Create Cross-Team Request">
+        <motion.div
+          {...fadeUp}
+          className="rounded-xl border-2 border-dashed border-primary/30 bg-primary-light p-6 text-center"
+        >
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+            <Send className="h-6 w-6 text-primary" />
+          </div>
+          <h3 className="text-sm font-semibold text-text-primary">Submit a Design Request</h3>
+          <p className="mt-1 text-xs text-text-secondary max-w-md mx-auto">
+            Need design work from another team? Create a cross-team request with details, priority, and attachments.
+          </p>
+          <Button variant="primary" size="sm" className="mt-4" onClick={() => setShowRequestForm(true)}>
+            <Plus className="h-4 w-4" />
+            New Request
+          </Button>
+        </motion.div>
+      </Section>
+
       {/* Quick Actions */}
       <Section title="Quick Actions">
         <div className="flex flex-wrap gap-3">
@@ -601,6 +928,13 @@ function AdminDashboard({ user, onOpenTask, onNavigate }: { user: User; onOpenTa
           </Button>
         </div>
       </Section>
+
+      {/* Request Form Modal */}
+      <CreateRequestForm
+        isOpen={showRequestForm}
+        onClose={() => setShowRequestForm(false)}
+        currentUserId={user.id}
+      />
     </motion.div>
   );
 }
@@ -788,6 +1122,8 @@ function RequesterDashboard({ user, onOpenTask }: { user: User; onOpenTask?: (ta
   const spaces = useSpaceStore((s) => s.spaces);
   const getSpacesByUser = useSpaceStore((s) => s.getSpacesByUser);
 
+  const [showRequestForm, setShowRequestForm] = useState(false);
+
   const now = new Date();
 
   const myRequests = useMemo(
@@ -839,7 +1175,25 @@ function RequesterDashboard({ user, onOpenTask }: { user: User; onOpenTask?: (ta
             {format(now, 'EEEE, MMMM d, yyyy')}
           </p>
         </div>
-        <Button variant="primary" size="sm">
+        <Button variant="primary" size="sm" onClick={() => setShowRequestForm(true)}>
+          <Plus className="h-4 w-4" />
+          New Request
+        </Button>
+      </motion.div>
+
+      {/* New Request CTA banner */}
+      <motion.div
+        {...fadeUp}
+        className="rounded-xl border-2 border-dashed border-primary/30 bg-primary-light p-5 flex items-center gap-4"
+      >
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+          <Send className="h-5 w-5 text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-semibold text-text-primary">Need a design?</h3>
+          <p className="text-xs text-text-secondary">Submit a request with details, priority level, and reference files.</p>
+        </div>
+        <Button variant="primary" size="sm" onClick={() => setShowRequestForm(true)}>
           <Plus className="h-4 w-4" />
           Create Request
         </Button>
@@ -928,6 +1282,13 @@ function RequesterDashboard({ user, onOpenTask }: { user: User; onOpenTask?: (ta
           ))}
         </div>
       </Section>
+
+      {/* Request Form Modal */}
+      <CreateRequestForm
+        isOpen={showRequestForm}
+        onClose={() => setShowRequestForm(false)}
+        currentUserId={user.id}
+      />
     </motion.div>
   );
 }

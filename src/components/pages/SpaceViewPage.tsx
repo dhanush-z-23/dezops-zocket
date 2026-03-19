@@ -933,6 +933,7 @@ function CreateTaskModal({
       },
       designTimeline: { startDate: null, endDate: null },
       tags,
+      brandId: null,
     });
 
     if (assigneeId) {

@@ -63,6 +63,34 @@ export interface Company {
   departments: string[];
 }
 
+// --- Brand System -------------------------------------------
+
+export interface BrandGuide {
+  id: string;
+  name: string;
+  logoUrl: string | null;
+  primaryColors: string[];
+  secondaryColors: string[];
+  fonts: string[];
+  tonOfVoice: string;
+  doList: string[];
+  dontList: string[];
+  referenceImageUrls: string[];
+  description: string;
+  aiGeneratedGuide: string | null; // AI-generated brand guide text
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AIReviewResult {
+  score: number; // 0-100
+  summary: string;
+  strengths: string[];
+  improvements: string[];
+  brandAlignmentNotes: string;
+  reviewedAt: string;
+}
+
 export interface SpaceMember {
   userId: string;
   role: Role;
@@ -134,6 +162,8 @@ export interface Task {
   completedAt: string | null; // ISO date
   slackApprovalSent: boolean;
   slackApprovalStatus: SlackApprovalStatus | null;
+  brandId: string | null; // linked brand
+  aiReview: AIReviewResult | null;
 }
 
 export interface Notification {

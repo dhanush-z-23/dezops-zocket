@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   User as UserIcon,
@@ -13,17 +13,25 @@ import {
   Check,
   Loader2,
   Link as LinkIcon,
+  Palette,
+  PaintBucket,
+  Type,
+  Image,
+  Sparkles,
+  Trash2,
+  Upload,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useBrandStore } from '@/stores/useBrandStore';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { cn } from '@/lib/utils';
-import type { NotificationType } from '@/types';
+import type { NotificationType, BrandGuide } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Animation preset
@@ -395,6 +403,654 @@ function CompanySection() {
 }
 
 // ---------------------------------------------------------------------------
+// Brand Guide section
+// ---------------------------------------------------------------------------
+
+function BrandCard({
+  brand,
+  onSelect,
+}: {
+  brand: BrandGuide;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      className="flex w-full items-start gap-4 rounded-lg border border-border bg-white p-4 text-left transition-colors hover:border-primary/40 hover:shadow-sm"
+    >
+      {/* Logo / placeholder */}
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-light text-lg font-bold text-primary">
+        {brand.logoUrl ? (
+          <img
+            src={brand.logoUrl}
+            alt={brand.name}
+            className="h-12 w-12 rounded-lg object-cover"
+          />
+        ) : (
+          brand.name.charAt(0)
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-text-primary">{brand.name}</p>
+        {brand.description && (
+          <p className="mt-0.5 line-clamp-1 text-xs text-text-tertiary">
+            {brand.description}
+          </p>
+        )}
+
+        {/* Primary colors */}
+        {brand.primaryColors.length > 0 && (
+          <div className="mt-2 flex items-center gap-1.5">
+            <Palette className="h-3 w-3 text-text-tertiary" />
+            {brand.primaryColors.map((c) => (
+              <span
+                key={c}
+                className="h-4 w-4 rounded-full border border-border"
+                style={{ backgroundColor: c }}
+                title={c}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Fonts */}
+        {brand.fonts.length > 0 && (
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <Type className="h-3 w-3 text-text-tertiary" />
+            <span className="text-xs text-text-secondary">
+              {brand.fonts.join(', ')}
+            </span>
+          </div>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function BrandEditor({
+  brand,
+  onClose,
+}: {
+  brand: BrandGuide;
+  onClose: () => void;
+}) {
+  const updateBrand = useBrandStore((s) => s.updateBrand);
+  const deleteBrand = useBrandStore((s) => s.deleteBrand);
+  const addReferenceImage = useBrandStore((s) => s.addReferenceImage);
+  const removeReferenceImage = useBrandStore((s) => s.removeReferenceImage);
+  const setAIGeneratedGuide = useBrandStore((s) => s.setAIGeneratedGuide);
+
+  const [name, setName] = useState(brand.name);
+  const [description, setDescription] = useState(brand.description);
+  const [tonOfVoice, setTonOfVoice] = useState(brand.tonOfVoice);
+  const [primaryColors, setPrimaryColors] = useState<string[]>(brand.primaryColors);
+  const [secondaryColors, setSecondaryColors] = useState<string[]>(brand.secondaryColors);
+  const [fonts, setFonts] = useState<string[]>(brand.fonts);
+  const [doList, setDoList] = useState<string[]>(brand.doList);
+  const [dontList, setDontList] = useState<string[]>(brand.dontList);
+  const [newPrimary, setNewPrimary] = useState('#');
+  const [newSecondary, setNewSecondary] = useState('#');
+  const [newFont, setNewFont] = useState('');
+  const [newDo, setNewDo] = useState('');
+  const [newDont, setNewDont] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingRef, setUploadingRef] = useState(false);
+  const [generatingAI, setGeneratingAI] = useState(false);
+  const [logoUrl, setLogoUrl] = useState(brand.logoUrl);
+  const [refImages, setRefImages] = useState<string[]>(brand.referenceImageUrls);
+  const [aiGuide, setAiGuide] = useState(brand.aiGeneratedGuide);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const refInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingLogo(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      setLogoUrl(data.url);
+    } catch {
+      toast.error('Logo upload failed');
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  const handleRefUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const remaining = 10 - refImages.length;
+    if (remaining <= 0) {
+      toast.error('Maximum 10 reference images allowed');
+      return;
+    }
+    setUploadingRef(true);
+    try {
+      const toUpload = Array.from(files).slice(0, remaining);
+      const urls: string[] = [];
+      for (const file of toUpload) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('/api/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        urls.push(data.url);
+      }
+      setRefImages((prev) => [...prev, ...urls]);
+      urls.forEach((url) => addReferenceImage(brand.id, url));
+    } catch {
+      toast.error('Reference image upload failed');
+    } finally {
+      setUploadingRef(false);
+      if (refInputRef.current) refInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveRef = (url: string) => {
+    setRefImages((prev) => prev.filter((u) => u !== url));
+    removeReferenceImage(brand.id, url);
+  };
+
+  const handleGenerateAI = async () => {
+    setGeneratingAI(true);
+    try {
+      const res = await fetch('/api/ai-brand-guide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referenceImageUrls: refImages }),
+      });
+      const data = await res.json();
+      const guide = data.guide ?? data.content ?? '';
+      setAiGuide(guide);
+      setAIGeneratedGuide(brand.id, guide);
+      toast.success('AI brand guide generated');
+    } catch {
+      toast.error('Failed to generate AI brand guide');
+    } finally {
+      setGeneratingAI(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    await new Promise((r) => setTimeout(r, 500));
+    updateBrand(brand.id, {
+      name: name.trim() || brand.name,
+      description,
+      logoUrl,
+      primaryColors,
+      secondaryColors,
+      fonts,
+      tonOfVoice,
+      doList,
+      dontList,
+    });
+    setSaving(false);
+    toast.success('Brand updated successfully');
+  };
+
+  const handleDelete = () => {
+    deleteBrand(brand.id);
+    toast.success('Brand deleted');
+    onClose();
+  };
+
+  const addColor = (
+    color: string,
+    setColor: (v: string) => void,
+    list: string[],
+    setList: (v: string[]) => void,
+  ) => {
+    const trimmed = color.trim();
+    if (!trimmed || !/^#[0-9a-fA-F]{3,8}$/.test(trimmed) || list.includes(trimmed)) return;
+    setList([...list, trimmed]);
+    setColor('#');
+  };
+
+  const removeFromList = (item: string, list: string[], setList: (v: string[]) => void) => {
+    setList(list.filter((i) => i !== item));
+  };
+
+  const addToStringList = (
+    value: string,
+    setValue: (v: string) => void,
+    list: string[],
+    setList: (v: string[]) => void,
+  ) => {
+    const trimmed = value.trim();
+    if (!trimmed || list.includes(trimmed)) return;
+    setList([...list, trimmed]);
+    setValue('');
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={onClose}
+          className="text-sm text-primary hover:underline"
+        >
+          &larr; Back to brands
+        </button>
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={() => setConfirmDelete(true)}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Delete brand
+        </Button>
+      </div>
+
+      {confirmDelete && (
+        <div className="rounded-lg border border-error/30 bg-error/5 p-4">
+          <p className="text-sm text-text-primary">Are you sure you want to delete this brand?</p>
+          <div className="mt-3 flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" onClick={handleDelete}>
+              Confirm delete
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Brand name */}
+      <Input
+        label="Brand name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Brand name"
+      />
+
+      {/* Description */}
+      <div className="flex flex-col gap-1.5">
+        <label className="text-sm font-medium text-text-primary">Description</label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Brief description of the brand..."
+          rows={3}
+          className={cn(
+            'rounded-lg border border-border bg-white px-3 py-2 text-sm text-text-primary',
+            'placeholder:text-text-tertiary',
+            'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
+            'resize-none',
+          )}
+        />
+      </div>
+
+      {/* Logo upload */}
+      <div className="flex flex-col gap-1.5">
+        <label className="text-sm font-medium text-text-primary">Logo</label>
+        <div className="flex items-center gap-3">
+          {logoUrl ? (
+            <img src={logoUrl} alt="Logo" className="h-12 w-12 rounded-lg border border-border object-cover" />
+          ) : (
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-surface-secondary text-text-tertiary">
+              <Image className="h-5 w-5" />
+            </div>
+          )}
+          <input
+            ref={logoInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleLogoUpload}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => logoInputRef.current?.click()}
+            loading={uploadingLogo}
+          >
+            {!uploadingLogo && <Upload className="h-3.5 w-3.5" />}
+            Upload logo
+          </Button>
+          {logoUrl && (
+            <Button variant="ghost" size="sm" onClick={() => setLogoUrl(null)}>
+              <X className="h-3.5 w-3.5" />
+              Remove
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Primary colors */}
+      <div className="flex flex-col gap-2">
+        <label className="text-sm font-medium text-text-primary flex items-center gap-1.5">
+          <Palette className="h-3.5 w-3.5 text-primary" />
+          Primary Colors
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {primaryColors.map((c) => (
+            <span key={c} className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1 text-xs">
+              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: c }} />
+              {c}
+              <button onClick={() => removeFromList(c, primaryColors, setPrimaryColors)} className="ml-0.5 rounded-full p-0.5 hover:bg-border transition-colors">
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newPrimary}
+            onChange={(e) => setNewPrimary(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addColor(newPrimary, setNewPrimary, primaryColors, setPrimaryColors)}
+            placeholder="#6366F1"
+            className={cn(
+              'h-9 w-36 rounded-lg border border-border bg-white px-3 text-sm text-text-primary',
+              'placeholder:text-text-tertiary',
+              'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
+            )}
+          />
+          <Button variant="outline" size="sm" onClick={() => addColor(newPrimary, setNewPrimary, primaryColors, setPrimaryColors)}>
+            <Plus className="h-3.5 w-3.5" />
+            Add
+          </Button>
+        </div>
+      </div>
+
+      {/* Secondary colors */}
+      <div className="flex flex-col gap-2">
+        <label className="text-sm font-medium text-text-primary flex items-center gap-1.5">
+          <PaintBucket className="h-3.5 w-3.5 text-primary" />
+          Secondary Colors
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {secondaryColors.map((c) => (
+            <span key={c} className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1 text-xs">
+              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: c }} />
+              {c}
+              <button onClick={() => removeFromList(c, secondaryColors, setSecondaryColors)} className="ml-0.5 rounded-full p-0.5 hover:bg-border transition-colors">
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newSecondary}
+            onChange={(e) => setNewSecondary(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addColor(newSecondary, setNewSecondary, secondaryColors, setSecondaryColors)}
+            placeholder="#F59E0B"
+            className={cn(
+              'h-9 w-36 rounded-lg border border-border bg-white px-3 text-sm text-text-primary',
+              'placeholder:text-text-tertiary',
+              'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
+            )}
+          />
+          <Button variant="outline" size="sm" onClick={() => addColor(newSecondary, setNewSecondary, secondaryColors, setSecondaryColors)}>
+            <Plus className="h-3.5 w-3.5" />
+            Add
+          </Button>
+        </div>
+      </div>
+
+      {/* Fonts */}
+      <div className="flex flex-col gap-2">
+        <label className="text-sm font-medium text-text-primary flex items-center gap-1.5">
+          <Type className="h-3.5 w-3.5 text-primary" />
+          Fonts
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {fonts.map((f) => (
+            <span key={f} className="inline-flex items-center gap-1 rounded-full bg-primary-light px-2.5 py-1 text-xs font-medium text-primary">
+              {f}
+              <button onClick={() => removeFromList(f, fonts, setFonts)} className="ml-0.5 rounded-full p-0.5 hover:bg-primary/20 transition-colors">
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newFont}
+            onChange={(e) => setNewFont(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addToStringList(newFont, setNewFont, fonts, setFonts)}
+            placeholder="Add a font..."
+            className={cn(
+              'h-9 flex-1 rounded-lg border border-border bg-white px-3 text-sm text-text-primary',
+              'placeholder:text-text-tertiary',
+              'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
+            )}
+          />
+          <Button variant="outline" size="sm" onClick={() => addToStringList(newFont, setNewFont, fonts, setFonts)}>
+            <Plus className="h-3.5 w-3.5" />
+            Add
+          </Button>
+        </div>
+      </div>
+
+      {/* Tone of voice */}
+      <div className="flex flex-col gap-1.5">
+        <label className="text-sm font-medium text-text-primary">Tone of Voice</label>
+        <textarea
+          value={tonOfVoice}
+          onChange={(e) => setTonOfVoice(e.target.value)}
+          placeholder="Describe the brand's tone of voice..."
+          rows={3}
+          className={cn(
+            'rounded-lg border border-border bg-white px-3 py-2 text-sm text-text-primary',
+            'placeholder:text-text-tertiary',
+            'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
+            'resize-none',
+          )}
+        />
+      </div>
+
+      {/* Do's */}
+      <div className="flex flex-col gap-2">
+        <label className="text-sm font-medium text-text-primary">Do&apos;s</label>
+        <div className="space-y-1.5">
+          {doList.map((item, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-lg bg-success/5 border border-success/20 px-3 py-1.5 text-sm text-text-primary">
+              <Check className="h-3.5 w-3.5 shrink-0 text-success" />
+              <span className="flex-1">{item}</span>
+              <button onClick={() => removeFromList(item, doList, setDoList)} className="shrink-0 rounded-full p-0.5 hover:bg-border transition-colors">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newDo}
+            onChange={(e) => setNewDo(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addToStringList(newDo, setNewDo, doList, setDoList)}
+            placeholder="Add a do item..."
+            className={cn(
+              'h-9 flex-1 rounded-lg border border-border bg-white px-3 text-sm text-text-primary',
+              'placeholder:text-text-tertiary',
+              'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
+            )}
+          />
+          <Button variant="outline" size="sm" onClick={() => addToStringList(newDo, setNewDo, doList, setDoList)}>
+            <Plus className="h-3.5 w-3.5" />
+            Add
+          </Button>
+        </div>
+      </div>
+
+      {/* Don'ts */}
+      <div className="flex flex-col gap-2">
+        <label className="text-sm font-medium text-text-primary">Don&apos;ts</label>
+        <div className="space-y-1.5">
+          {dontList.map((item, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-lg bg-error/5 border border-error/20 px-3 py-1.5 text-sm text-text-primary">
+              <X className="h-3.5 w-3.5 shrink-0 text-error" />
+              <span className="flex-1">{item}</span>
+              <button onClick={() => removeFromList(item, dontList, setDontList)} className="shrink-0 rounded-full p-0.5 hover:bg-border transition-colors">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newDont}
+            onChange={(e) => setNewDont(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addToStringList(newDont, setNewDont, dontList, setDontList)}
+            placeholder="Add a don't item..."
+            className={cn(
+              'h-9 flex-1 rounded-lg border border-border bg-white px-3 text-sm text-text-primary',
+              'placeholder:text-text-tertiary',
+              'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
+            )}
+          />
+          <Button variant="outline" size="sm" onClick={() => addToStringList(newDont, setNewDont, dontList, setDontList)}>
+            <Plus className="h-3.5 w-3.5" />
+            Add
+          </Button>
+        </div>
+      </div>
+
+      {/* Reference images */}
+      <div className="flex flex-col gap-2">
+        <label className="text-sm font-medium text-text-primary flex items-center gap-1.5">
+          <Image className="h-3.5 w-3.5 text-primary" />
+          Reference Images ({refImages.length}/10)
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {refImages.map((url) => (
+            <div key={url} className="group relative h-20 w-20 overflow-hidden rounded-lg border border-border">
+              <img src={url} alt="Reference" className="h-full w-full object-cover" />
+              <button
+                onClick={() => handleRemoveRef(url)}
+                className="absolute right-1 top-1 hidden rounded-full bg-black/60 p-0.5 text-white group-hover:block"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <input
+          ref={refInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={handleRefUpload}
+        />
+        {refImages.length < 10 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refInputRef.current?.click()}
+            loading={uploadingRef}
+            className="w-fit"
+          >
+            {!uploadingRef && <Upload className="h-3.5 w-3.5" />}
+            Upload reference images
+          </Button>
+        )}
+      </div>
+
+      {/* Generate AI brand guide */}
+      <div className="flex flex-col gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleGenerateAI}
+          loading={generatingAI}
+          className="w-fit"
+        >
+          {!generatingAI && <Sparkles className="h-3.5 w-3.5" />}
+          Generate Brand Guide with AI
+        </Button>
+        {aiGuide && (
+          <div className="rounded-lg border border-border bg-surface-secondary p-4">
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-tertiary">
+              AI-Generated Brand Guide
+            </h4>
+            <div
+              className="prose prose-sm max-w-none text-sm text-text-primary"
+              dangerouslySetInnerHTML={{ __html: aiGuide.replace(/\n/g, '<br />') }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Save */}
+      <div className="flex justify-end pt-2">
+        <Button variant="primary" onClick={handleSave} loading={saving}>
+          {!saving && <Check className="h-4 w-4" />}
+          Save brand
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function BrandGuideSection() {
+  const brands = useBrandStore((s) => s.brands);
+  const createBrand = useBrandStore((s) => s.createBrand);
+  const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const selectedBrand = brands.find((b) => b.id === selectedBrandId) ?? null;
+
+  const handleAddBrand = () => {
+    setCreating(true);
+    const brand = createBrand({ name: 'New Brand' });
+    setSelectedBrandId(brand.id);
+    setCreating(false);
+  };
+
+  return (
+    <SettingSection
+      icon={Palette}
+      title="Brand Guide"
+      description="Manage your brand guidelines, colors, fonts, and reference materials."
+    >
+      {selectedBrand ? (
+        <BrandEditor
+          key={selectedBrand.id}
+          brand={selectedBrand}
+          onClose={() => setSelectedBrandId(null)}
+        />
+      ) : (
+        <>
+          <div className="space-y-3">
+            {brands.map((brand) => (
+              <BrandCard
+                key={brand.id}
+                brand={brand}
+                onSelect={() => setSelectedBrandId(brand.id)}
+              />
+            ))}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleAddBrand}
+            loading={creating}
+            className="w-fit"
+          >
+            {!creating && <Plus className="h-3.5 w-3.5" />}
+            Add New Brand
+          </Button>
+        </>
+      )}
+    </SettingSection>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Notification preferences section
 // ---------------------------------------------------------------------------
 
@@ -667,6 +1323,7 @@ export default function SettingsPage() {
       <div className="space-y-5">
         <ProfileSection />
         {isAdmin && <CompanySection />}
+        <BrandGuideSection />
         <NotificationSection />
         <SlackSection />
         {isAdmin && <DangerZoneSection />}

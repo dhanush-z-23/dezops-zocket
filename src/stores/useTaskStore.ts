@@ -8,8 +8,10 @@ import type {
   Comment,
   Revision,
   CommentType,
+  AIReviewResult,
 } from '@/types';
 import { generateId } from '@/lib/utils';
+import { useAuthStore } from './useAuthStore';
 
 // ---- Seed Data ----
 
@@ -68,6 +70,8 @@ const DEMO_TASKS: Task[] = [
     completedAt: null,
     slackApprovalSent: false,
     slackApprovalStatus: null,
+    brandId: null,
+    aiReview: null,
   },
   {
     id: 'task-2',
@@ -108,6 +112,8 @@ const DEMO_TASKS: Task[] = [
     completedAt: null,
     slackApprovalSent: true,
     slackApprovalStatus: 'pending',
+    brandId: 'brand-1',
+    aiReview: null,
   },
   {
     id: 'task-3',
@@ -159,6 +165,8 @@ const DEMO_TASKS: Task[] = [
     completedAt: null,
     slackApprovalSent: false,
     slackApprovalStatus: null,
+    brandId: null,
+    aiReview: null,
   },
   {
     id: 'task-4',
@@ -196,6 +204,8 @@ const DEMO_TASKS: Task[] = [
     completedAt: null,
     slackApprovalSent: false,
     slackApprovalStatus: null,
+    brandId: null,
+    aiReview: null,
   },
   {
     id: 'task-5',
@@ -254,6 +264,8 @@ const DEMO_TASKS: Task[] = [
     completedAt: null,
     slackApprovalSent: true,
     slackApprovalStatus: 'approved',
+    brandId: null,
+    aiReview: null,
   },
   {
     id: 'task-6',
@@ -291,6 +303,8 @@ const DEMO_TASKS: Task[] = [
     completedAt: null,
     slackApprovalSent: false,
     slackApprovalStatus: null,
+    brandId: null,
+    aiReview: null,
   },
   {
     id: 'task-7',
@@ -339,6 +353,8 @@ const DEMO_TASKS: Task[] = [
     completedAt: '2026-03-08T16:30:00.000Z',
     slackApprovalSent: true,
     slackApprovalStatus: 'approved',
+    brandId: null,
+    aiReview: null,
   },
   {
     id: 'task-8',
@@ -371,6 +387,8 @@ const DEMO_TASKS: Task[] = [
     completedAt: null,
     slackApprovalSent: false,
     slackApprovalStatus: null,
+    brandId: null,
+    aiReview: null,
   },
   {
     id: 'task-9',
@@ -399,6 +417,8 @@ const DEMO_TASKS: Task[] = [
     completedAt: null,
     slackApprovalSent: false,
     slackApprovalStatus: null,
+    brandId: null,
+    aiReview: null,
   },
   {
     id: 'task-10',
@@ -428,6 +448,8 @@ const DEMO_TASKS: Task[] = [
     completedAt: null,
     slackApprovalSent: false,
     slackApprovalStatus: null,
+    brandId: null,
+    aiReview: null,
   },
 ];
 
@@ -437,7 +459,7 @@ interface TaskState {
   tasks: Task[];
 
   // CRUD
-  createTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'completedAt' | 'timerStartedAt' | 'totalTimeSpent' | 'timerRunning' | 'revisions' | 'comments' | 'slackApprovalSent' | 'slackApprovalStatus'>) => Task;
+  createTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'completedAt' | 'timerStartedAt' | 'totalTimeSpent' | 'timerRunning' | 'revisions' | 'comments' | 'slackApprovalSent' | 'slackApprovalStatus' | 'aiReview'>) => Task;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   deleteTask: (taskId: string) => void;
 
@@ -466,6 +488,9 @@ interface TaskState {
 
   // Slack
   sendSlackApproval: (taskId: string) => void;
+
+  // AI Review
+  setAIReview: (taskId: string, review: AIReviewResult) => void;
 }
 
 export const useTaskStore = create<TaskState>()(
@@ -490,6 +515,7 @@ export const useTaskStore = create<TaskState>()(
           comments: [],
           slackApprovalSent: false,
           slackApprovalStatus: null,
+          aiReview: null,
         };
         set((state) => ({ tasks: [...state.tasks, task] }));
         return task;
@@ -684,6 +710,15 @@ export const useTaskStore = create<TaskState>()(
         if (status === 'in-progress' && !task.timerRunning) {
           updates.timerStartedAt = Date.now();
           updates.timerRunning = true;
+          // Set designer status to busy and track current task
+          if (task.assigneeId) {
+            const authStore = useAuthStore.getState();
+            const user = authStore.getUserById(task.assigneeId);
+            if (user && user.status !== 'blocked') {
+              authStore.updateUserStatus(task.assigneeId, 'busy');
+              authStore.updateUser(task.assigneeId, { currentTaskId: taskId });
+            }
+          }
         }
 
         // Auto-stop timer when leaving in-progress
@@ -694,9 +729,22 @@ export const useTaskStore = create<TaskState>()(
           updates.totalTimeSpent = task.totalTimeSpent + elapsed;
         }
 
-        // Mark completedAt
-        if (status === 'completed') {
-          updates.completedAt = now;
+        // Mark completedAt and set designer back to available
+        if (status === 'completed' || status === 'approved') {
+          if (status === 'completed') updates.completedAt = now;
+          if (task.assigneeId) {
+            const authStore = useAuthStore.getState();
+            const user = authStore.getUserById(task.assigneeId);
+            if (user && user.currentTaskId === taskId) {
+              // Check if designer has other active tasks
+              const otherActive = get().tasks.filter(
+                (t) => t.id !== taskId && t.assigneeId === task.assigneeId && t.status === 'in-progress',
+              );
+              if (otherActive.length === 0) {
+                authStore.updateUserStatus(task.assigneeId, 'available');
+              }
+            }
+          }
         }
 
         set((state) => ({
@@ -718,6 +766,17 @@ export const useTaskStore = create<TaskState>()(
                   slackApprovalStatus: 'pending' as const,
                   updatedAt: new Date().toISOString(),
                 }
+              : t,
+          ),
+        }));
+      },
+      // ---- AI Review ----
+
+      setAIReview: (taskId, review) => {
+        set((state) => ({
+          tasks: state.tasks.map((t) =>
+            t.id === taskId
+              ? { ...t, aiReview: review, updatedAt: new Date().toISOString() }
               : t,
           ),
         }));

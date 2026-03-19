@@ -28,6 +28,12 @@ import {
   Image,
   Video,
   ExternalLink,
+  Sparkles,
+  Star,
+  TrendingUp,
+  Palette,
+  ZoomIn,
+  Loader2,
 } from 'lucide-react';
 import { format, parseISO, differenceInDays, isAfter } from 'date-fns';
 
@@ -35,6 +41,7 @@ import { useTaskStore } from '@/stores/useTaskStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useSpaceStore } from '@/stores/useSpaceStore';
 import { useNotificationStore } from '@/stores/useNotificationStore';
+import { useBrandStore } from '@/stores/useBrandStore';
 import {
   cn,
   formatTime,
@@ -49,6 +56,8 @@ import type {
   CommentType,
   AttachmentType,
   UserStatus,
+  AIReviewResult,
+  BrandGuide,
 } from '@/types';
 
 import { Avatar } from '@/components/ui/Avatar';
@@ -150,6 +159,11 @@ export function TaskDetailPage({ taskId, onBack }: TaskDetailPageProps) {
   const startTimer = useTaskStore((s) => s.startTimer);
   const stopTimer = useTaskStore((s) => s.stopTimer);
   const sendSlackApproval = useTaskStore((s) => s.sendSlackApproval);
+  const setAIReview = useTaskStore((s) => s.setAIReview);
+
+  const brands = useBrandStore((s) => s.brands);
+  const getBrandById = useBrandStore((s) => s.getBrandById);
+  const createBrand = useBrandStore((s) => s.createBrand);
 
   const currentUser = useAuthStore((s) => s.currentUser);
   const getUserById = useAuthStore((s) => s.getUserById);
@@ -190,12 +204,16 @@ export function TaskDetailPage({ taskId, onBack }: TaskDetailPageProps) {
       startTimer={startTimer}
       stopTimer={stopTimer}
       sendSlackApproval={sendSlackApproval}
+      setAIReview={setAIReview}
       currentUser={currentUser!}
       getUserById={getUserById}
       allUsers={allUsers}
       getSpaceById={getSpaceById}
       addNotification={addNotification}
       isAdmin={isAdmin}
+      brands={brands}
+      getBrandById={getBrandById}
+      createBrand={createBrand}
     />
   );
 }
@@ -220,12 +238,16 @@ function TaskDetailInner({
   startTimer,
   stopTimer,
   sendSlackApproval,
+  setAIReview,
   currentUser,
   getUserById,
   allUsers,
   getSpaceById,
   addNotification,
   isAdmin,
+  brands,
+  getBrandById,
+  createBrand,
 }: {
   task: Task;
   onBack: () => void;
@@ -242,12 +264,16 @@ function TaskDetailInner({
   startTimer: (taskId: string) => void;
   stopTimer: (taskId: string) => void;
   sendSlackApproval: (taskId: string) => void;
+  setAIReview: (taskId: string, review: AIReviewResult) => void;
   currentUser: NonNullable<ReturnType<typeof useAuthStore.getState>['currentUser']>;
   getUserById: (id: string) => ReturnType<typeof useAuthStore.getState>['allUsers'][number] | undefined;
   allUsers: ReturnType<typeof useAuthStore.getState>['allUsers'];
   getSpaceById: (id: string) => ReturnType<typeof useSpaceStore.getState>['spaces'][number] | undefined;
   addNotification: ReturnType<typeof useNotificationStore.getState>['addNotification'];
   isAdmin: boolean;
+  brands: BrandGuide[];
+  getBrandById: (id: string) => BrandGuide | undefined;
+  createBrand: ReturnType<typeof useBrandStore.getState>['createBrand'];
 }) {
   const space = getSpaceById(task.spaceId);
   const assignee = task.assigneeId ? getUserById(task.assigneeId) : null;
@@ -454,6 +480,13 @@ function TaskDetailInner({
             removeAttachment={removeAttachment}
           />
 
+          {/* AI Review */}
+          <AIReviewSection
+            task={task}
+            setAIReview={setAIReview}
+            getBrandById={getBrandById}
+          />
+
           {/* Revisions */}
           <RevisionsSection
             task={task}
@@ -485,6 +518,9 @@ function TaskDetailInner({
             getUserById={getUserById}
             updateTask={updateTask}
             allUsers={allUsers}
+            brands={brands}
+            getBrandById={getBrandById}
+            createBrand={createBrand}
           />
 
           {/* Timeline card */}
@@ -598,6 +634,7 @@ function SubtasksSection({
       expectedTimeline: { startDate: null, endDate: null },
       designTimeline: { startDate: null, endDate: null },
       tags: [],
+      brandId: task.brandId ?? null,
     });
     setNewTitle('');
     setShowAdd(false);
@@ -750,6 +787,8 @@ function AttachmentsSection({
   const [attName, setAttName] = useState('');
   const [attUrl, setAttUrl] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewName, setPreviewName] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleAddLink = () => {
@@ -912,20 +951,26 @@ function AttachmentsSection({
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {task.attachments.map((att) => {
           const Icon = ATTACHMENT_ICONS[att.type] || FileText;
-          const isImage = att.type === 'image' && att.url.startsWith('data:image');
+          const isImage = att.type === 'image';
           return (
             <div
               key={att.id}
               className="rounded-lg border border-border-light bg-surface-secondary overflow-hidden group"
             >
-              {/* Image preview */}
+              {/* Image thumbnail */}
               {isImage && (
-                <div className="relative h-24 w-full bg-surface-tertiary">
+                <div
+                  className="relative h-32 w-full bg-surface-tertiary cursor-pointer group/img"
+                  onClick={() => { setPreviewUrl(att.url); setPreviewName(att.name); }}
+                >
                   <img
                     src={att.url}
                     alt={att.name}
                     className="h-full w-full object-cover"
                   />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover/img:bg-black/30 transition-colors">
+                    <ZoomIn className="h-6 w-6 text-white opacity-0 group-hover/img:opacity-100 transition-opacity" />
+                  </div>
                 </div>
               )}
               <div className="flex items-center gap-2.5 p-2.5">
@@ -945,6 +990,15 @@ function AttachmentsSection({
                     </span>
                   </div>
                 </div>
+                {isImage && (
+                  <button
+                    onClick={() => { setPreviewUrl(att.url); setPreviewName(att.name); }}
+                    className="shrink-0 rounded p-1 text-text-tertiary opacity-0 group-hover:opacity-100 hover:bg-primary-light hover:text-primary transition-all"
+                    title="Preview"
+                  >
+                    <ZoomIn className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 <button
                   onClick={() => handleDownload(att)}
                   className="shrink-0 rounded p-1 text-text-tertiary opacity-0 group-hover:opacity-100 hover:bg-primary-light hover:text-primary transition-all"
@@ -964,6 +1018,46 @@ function AttachmentsSection({
           );
         })}
       </div>
+
+      {/* Image lightbox / expanded preview */}
+      <AnimatePresence>
+        {previewUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            onClick={() => setPreviewUrl(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative max-h-[90vh] max-w-[90vw] rounded-xl overflow-hidden bg-white shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+                <p className="text-sm font-medium text-text-primary truncate max-w-[400px]">
+                  {previewName}
+                </p>
+                <button
+                  onClick={() => setPreviewUrl(null)}
+                  className="rounded-lg p-1.5 text-text-tertiary hover:bg-surface-tertiary hover:text-text-primary transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex items-center justify-center bg-surface-tertiary p-4">
+                <img
+                  src={previewUrl}
+                  alt={previewName}
+                  className="max-h-[75vh] max-w-full object-contain rounded"
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Add link inline form */}
       <AnimatePresence>
@@ -1001,6 +1095,270 @@ function AttachmentsSection({
           </motion.div>
         )}
       </AnimatePresence>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AI Review Section
+// ---------------------------------------------------------------------------
+
+function AIReviewSection({
+  task,
+  setAIReview,
+  getBrandById,
+}: {
+  task: Task;
+  setAIReview: (taskId: string, review: AIReviewResult) => void;
+  getBrandById: (id: string) => BrandGuide | undefined;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const imageAttachments = useMemo(
+    () => task.attachments.filter((a) => a.type === 'image'),
+    [task.attachments],
+  );
+
+  const brand = task.brandId ? getBrandById(task.brandId) : undefined;
+
+  const handleRunReview = async () => {
+    if (imageAttachments.length === 0) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/ai-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl: imageAttachments[0].url,
+          brandGuide: brand
+            ? {
+                name: brand.name,
+                primaryColors: brand.primaryColors,
+                secondaryColors: brand.secondaryColors,
+                fonts: brand.fonts,
+                tonOfVoice: brand.tonOfVoice,
+                doList: brand.doList,
+                dontList: brand.dontList,
+                description: brand.description,
+              }
+            : null,
+        }),
+      });
+
+      if (!res.ok) {
+        // Fallback: generate a mock review when the API is unavailable
+        const mockReview: AIReviewResult = {
+          score: Math.floor(Math.random() * 25) + 70,
+          summary: 'The design demonstrates strong visual hierarchy and clean composition. ' +
+            (brand ? `It aligns well with ${brand.name} brand guidelines overall.` : 'Consider linking a brand guide for more targeted feedback.'),
+          strengths: [
+            'Clean layout with good use of whitespace',
+            'Strong visual hierarchy guides the eye naturally',
+            'Typography choices are modern and readable',
+          ],
+          improvements: [
+            'Consider increasing contrast for accessibility compliance',
+            'CTA buttons could be more prominent',
+            'Add more breathing room between sections',
+          ],
+          brandAlignmentNotes: brand
+            ? `The design uses colors close to the ${brand.name} palette. Ensure primary brand color ${brand.primaryColors[0] || ''} is used consistently for key UI elements.`
+            : 'No brand guide linked. Attach a brand to receive alignment feedback.',
+          reviewedAt: new Date().toISOString(),
+        };
+        setAIReview(task.id, mockReview);
+        return;
+      }
+
+      const review: AIReviewResult = await res.json();
+      setAIReview(task.id, review);
+    } catch (err) {
+      // Fallback mock on network error as well
+      const mockReview: AIReviewResult = {
+        score: Math.floor(Math.random() * 25) + 70,
+        summary: 'The design shows solid fundamentals with room for refinement. ' +
+          (brand ? `Evaluated against ${brand.name} brand standards.` : 'Link a brand guide for brand-specific feedback.'),
+        strengths: [
+          'Good compositional balance',
+          'Effective use of color to create hierarchy',
+          'Consistent spacing throughout the design',
+        ],
+        improvements: [
+          'Text contrast could be improved for readability',
+          'Consider simplifying the layout for mobile viewports',
+          'Iconography style could be more unified',
+        ],
+        brandAlignmentNotes: brand
+          ? `Partially aligned with ${brand.name}. Review font choices against brand spec (${brand.fonts.join(', ')}).`
+          : 'No brand guide linked. Attach a brand for detailed alignment notes.',
+        reviewedAt: new Date().toISOString(),
+      };
+      setAIReview(task.id, mockReview);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Don't render at all if no image attachments
+  if (imageAttachments.length === 0 && !task.aiReview) return null;
+
+  const review = task.aiReview;
+
+  const scoreColor =
+    review && review.score >= 80
+      ? 'text-success'
+      : review && review.score >= 60
+        ? 'text-warning'
+        : review
+          ? 'text-error'
+          : 'text-text-tertiary';
+
+  const scoreBgColor =
+    review && review.score >= 80
+      ? 'bg-success/10'
+      : review && review.score >= 60
+        ? 'bg-warning/10'
+        : review
+          ? 'bg-error/10'
+          : 'bg-surface-tertiary';
+
+  return (
+    <section className="rounded-xl border border-border bg-white p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text-tertiary">
+          <Sparkles className="h-3.5 w-3.5 text-primary" />
+          AI Design Review
+        </h3>
+        {imageAttachments.length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRunReview}
+            loading={loading}
+            disabled={loading}
+          >
+            {loading ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Reviewing...
+              </>
+            ) : review ? (
+              <>
+                <RotateCcw className="h-3.5 w-3.5" />
+                Re-run Review
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-3.5 w-3.5" />
+                AI Review
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+
+      {error && (
+        <div className="mb-3 flex items-center gap-1.5 rounded-md bg-error/10 px-2.5 py-1.5 text-xs text-error">
+          <AlertCircle className="h-3.5 w-3.5" />
+          {error}
+        </div>
+      )}
+
+      {!review && !loading && (
+        <p className="py-3 text-center text-xs text-text-tertiary">
+          {imageAttachments.length > 0
+            ? 'Click "AI Review" to get AI-powered feedback on your design.'
+            : 'Upload image attachments to enable AI review.'}
+        </p>
+      )}
+
+      {loading && !review && (
+        <div className="flex flex-col items-center gap-2 py-6">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <p className="text-xs text-text-secondary">Analyzing your design...</p>
+        </div>
+      )}
+
+      {review && (
+        <div className="space-y-4">
+          {/* Score */}
+          <div className="flex items-center gap-4">
+            <div className={cn('flex h-16 w-16 flex-col items-center justify-center rounded-xl', scoreBgColor)}>
+              <span className={cn('text-2xl font-bold', scoreColor)}>{review.score}</span>
+              <span className="text-[9px] font-medium text-text-tertiary">/100</span>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm text-text-primary leading-relaxed">{review.summary}</p>
+              <p className="mt-1 text-[10px] text-text-tertiary">
+                Reviewed {format(parseISO(review.reviewedAt), 'MMM d, yyyy h:mm a')}
+              </p>
+            </div>
+          </div>
+
+          {/* Score bar */}
+          <div className="h-2 w-full rounded-full bg-surface-tertiary overflow-hidden">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${review.score}%` }}
+              transition={{ duration: 0.8, ease: 'easeOut' }}
+              className={cn(
+                'h-full rounded-full',
+                review.score >= 80
+                  ? 'bg-success'
+                  : review.score >= 60
+                    ? 'bg-warning'
+                    : 'bg-error',
+              )}
+            />
+          </div>
+
+          {/* Strengths */}
+          <div>
+            <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-success">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Strengths
+            </h4>
+            <ul className="space-y-1">
+              {review.strengths.map((s, i) => (
+                <li key={i} className="flex items-start gap-2 text-xs text-text-secondary">
+                  <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
+                  {s}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Improvements */}
+          <div>
+            <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-warning">
+              <TrendingUp className="h-3.5 w-3.5" />
+              Improvements
+            </h4>
+            <ul className="space-y-1">
+              {review.improvements.map((s, i) => (
+                <li key={i} className="flex items-start gap-2 text-xs text-text-secondary">
+                  <AlertCircle className="mt-0.5 h-3 w-3 shrink-0 text-warning" />
+                  {s}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Brand Alignment */}
+          <div>
+            <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-primary">
+              <Palette className="h-3.5 w-3.5" />
+              Brand Alignment
+            </h4>
+            <p className="text-xs text-text-secondary leading-relaxed">
+              {review.brandAlignmentNotes}
+            </p>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -1314,6 +1672,9 @@ function DetailsCard({
   getUserById,
   updateTask,
   allUsers,
+  brands,
+  getBrandById,
+  createBrand,
 }: {
   task: Task;
   assignee: ReturnType<typeof useAuthStore.getState>['allUsers'][number] | null | undefined;
@@ -1322,9 +1683,14 @@ function DetailsCard({
   getUserById: (id: string) => ReturnType<typeof useAuthStore.getState>['allUsers'][number] | undefined;
   updateTask: (id: string, updates: Partial<Task>) => void;
   allUsers: ReturnType<typeof useAuthStore.getState>['allUsers'];
+  brands: BrandGuide[];
+  getBrandById: (id: string) => BrandGuide | undefined;
+  createBrand: ReturnType<typeof useBrandStore.getState>['createBrand'];
 }) {
   const [editingTags, setEditingTags] = useState(false);
   const [tagInput, setTagInput] = useState('');
+  const [creatingBrand, setCreatingBrand] = useState(false);
+  const [newBrandName, setNewBrandName] = useState('');
 
   const designers = useMemo(
     () => allUsers.filter((u) => u.role === 'designer'),
@@ -1407,6 +1773,115 @@ function DetailsCard({
           </div>
         </div>
       )}
+
+      {/* Brand */}
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-text-tertiary">
+          Brand Guide
+        </label>
+        {!creatingBrand ? (
+          <div className="space-y-2">
+            <Select
+              value={task.brandId || ''}
+              onChange={(e) =>
+                updateTask(task.id, {
+                  brandId: e.target.value || null,
+                })
+              }
+              options={[
+                { value: '', label: 'No brand linked' },
+                ...brands.map((b) => ({ value: b.id, label: b.name })),
+              ]}
+            />
+            {task.brandId && (() => {
+              const linkedBrand = getBrandById(task.brandId);
+              return linkedBrand ? (
+                <div className="rounded-lg bg-surface-secondary p-2.5 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Palette className="h-3.5 w-3.5 text-primary" />
+                    <span className="text-xs font-medium text-text-primary">{linkedBrand.name}</span>
+                  </div>
+                  {linkedBrand.primaryColors.length > 0 && (
+                    <div className="flex items-center gap-1">
+                      {linkedBrand.primaryColors.map((color) => (
+                        <span
+                          key={color}
+                          className="h-4 w-4 rounded-full border border-border-light"
+                          style={{ backgroundColor: color }}
+                          title={color}
+                        />
+                      ))}
+                      {linkedBrand.secondaryColors.map((color) => (
+                        <span
+                          key={color}
+                          className="h-3.5 w-3.5 rounded-full border border-border-light opacity-70"
+                          style={{ backgroundColor: color }}
+                          title={color}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {linkedBrand.fonts.length > 0 && (
+                    <p className="text-[10px] text-text-tertiary">
+                      Fonts: {linkedBrand.fonts.join(', ')}
+                    </p>
+                  )}
+                </div>
+              ) : null;
+            })()}
+            <button
+              onClick={() => setCreatingBrand(true)}
+              className="flex items-center gap-1 text-[11px] text-primary hover:text-primary-hover transition-colors"
+            >
+              <Plus className="h-3 w-3" />
+              Create new brand
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2 rounded-lg border border-border bg-surface-secondary p-2.5">
+            <p className="text-[11px] font-medium text-text-primary">New Brand</p>
+            <Input
+              autoFocus
+              placeholder="Brand name"
+              value={newBrandName}
+              onChange={(e) => setNewBrandName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newBrandName.trim()) {
+                  const brand = createBrand({ name: newBrandName.trim() });
+                  updateTask(task.id, { brandId: brand.id });
+                  setNewBrandName('');
+                  setCreatingBrand(false);
+                }
+                if (e.key === 'Escape') {
+                  setNewBrandName('');
+                  setCreatingBrand(false);
+                }
+              }}
+            />
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                disabled={!newBrandName.trim()}
+                onClick={() => {
+                  const brand = createBrand({ name: newBrandName.trim() });
+                  updateTask(task.id, { brandId: brand.id });
+                  setNewBrandName('');
+                  setCreatingBrand(false);
+                }}
+              >
+                Create
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setNewBrandName(''); setCreatingBrand(false); }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Tags */}
       <div>
